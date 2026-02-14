@@ -14,8 +14,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
-  // Load user from localStorage on mount
+  // Load user from localStorage on mount and initialize admin account
   useEffect(() => {
+    // Initialize admin account if it doesn't exist
+    const existingUsers = JSON.parse(localStorage.getItem('labSupplyUsers') || '[]');
+    const adminExists = existingUsers.some((u: any) => u.email === 'admin@gmail.com');
+    
+    if (!adminExists) {
+      const adminUser: User = {
+        id: 'admin-001',
+        email: 'admin@gmail.com',
+        name: 'Administrator',
+        role: 'admin',
+        createdAt: new Date().toISOString(),
+      };
+      const hashedPassword = btoa('12345678');
+      existingUsers.push({ ...adminUser, password: hashedPassword });
+      localStorage.setItem('labSupplyUsers', JSON.stringify(existingUsers));
+    }
+
     const savedUser = localStorage.getItem('labSupplyUser');
     if (savedUser) {
       const parsedUser = JSON.parse(savedUser);
