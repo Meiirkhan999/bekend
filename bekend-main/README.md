@@ -43,11 +43,10 @@
 
 ## 🛠️ Технологиялар
 
-- **React 18+** - интерактивті UI
-- **TypeScript** - типті қауіпсіздік
-- **Vite** - жылдам құрылым құрушы
-- **CSS3** - градиент және анимациялар
-- **LocalStorage API** - деректерді браузерге сақтау
+- **Frontend:** React + TypeScript + Vite
+- **Backend:** Node.js + Express + Sequelize
+- **Database:** PostgreSQL (Docker ортада), SQLite (локалды fallback)
+- **CI/CD:** GitHub Actions
 
 ## 📦 Назначен құрылымы
 
@@ -135,13 +134,17 @@ npm run preview
 1. `docker-compose build`
 2. `docker-compose up -d`
 3. Фронтенд: `http://localhost:5173`, бэкенд: `http://localhost:3001/api/health`
+4. База: `postgres://postgres:postgres@localhost:5432/lab_supply`
 
 ## 🔁 CI/CD (GitHub Actions)
 
 - Файл: `.github/workflows/ci.yml`
 - Әр push/PR үшін:
   - Frontend: `npm ci`, `npm run lint`, `npm run build`
-  - Backend: `npm ci`, Sequelize мұрағат синхронизациясы (`sequelize.sync({ alter: true })`)
+  - Backend: `npm ci`, Sequelize sync тексеруі (`sequelize.sync({ alter: true })`)
+  - Docker image build (frontend + backend)
+- `main` тармағында және deploy secret-тері орнатылса:
+  - SSH арқылы target серверге deploy (`git pull && docker compose up -d`)
 
 ## 🔧 Тексеру
 

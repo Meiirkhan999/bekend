@@ -1,12 +1,23 @@
-import { useState, useMemo, useRef, useEffect } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import type { LabSupply } from '../data/supplies';
-import { labSupplies as initialSupplies } from '../data/supplies';
 import { Header } from './Header';
 import { AdminPanel } from './AdminPanel';
 import './LabSupplyFinder.css';
 
+type SortField = 'name' | 'price' | 'category' | 'availability' | 'createdAt';
+type SortOrder = 'asc' | 'desc';
+
+const API_BASE_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+const PAGE_SIZE = 8;
+
 export const LabSupplyFinder = () => {
-  const [supplies, setSupplies] = useState<LabSupply[]>(initialSupplies);
+  const [supplies, setSupplies] = useState<LabSupply[]>([]);
+  const [total, setTotal] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [sortBy, setSortBy] = useState<SortField>('name');
+  const [order, setOrder] = useState<SortOrder>('asc');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [suggestions, setSuggestions] = useState<LabSupply[]>([]);
@@ -19,6 +30,7 @@ export const LabSupplyFinder = () => {
   const [showAdmin, setShowAdmin] = useState(false);
   const [showRequestForm, setShowRequestForm] = useState(false);
   const [requestData, setRequestData] = useState({ quantity: 1, notes: '' });
+  const [requestError, setRequestError] = useState<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const categories = ['All', 'Equipment', 'Reagent', 'Consumable'];
@@ -43,8 +55,46 @@ export const LabSupplyFinder = () => {
     localStorage.setItem('labSupplyCompare', JSON.stringify(newCompareList));
   };
 
+  const fetchSupplies = useCallback(async (page = currentPage) => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams({
+        page: String(page),
+        limit: String(PAGE_SIZE),
+        search: searchQuery,
+        category: selectedCategory,
+        sortBy,
+        order,
+      });
+      const response = await fetch(`${API_BASE_URL}/api/supplies?${params.toString()}`);
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.message || 'Серверден дерек алу сәтсіз аяқталды');
+      }
+      const data = await response.json();
+      setSupplies(Array.isArray(data.supplies) ? data.supplies : []);
+      setTotal(Number(data.total) || 0);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Күтпеген қате орын алды';
+      setError(message);
+      setSupplies([]);
+      setTotal(0);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [currentPage, searchQuery, selectedCategory, sortBy, order]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, selectedCategory, sortBy, order]);
+
+  useEffect(() => {
+    void fetchSupplies(currentPage);
+  }, [currentPage, searchQuery, selectedCategory, sortBy, order]);
+
   // Generate autocomplete suggestions
-  const generateSuggestions = (query: string): LabSupply[] => {
+  const generateSuggestions = useCallback((query: string): LabSupply[] => {
     if (!query.trim()) return [];
 
     const lowerQuery = query.toLowerCase();
@@ -61,7 +111,7 @@ export const LabSupplyFinder = () => {
         return matchesQuery && matchesCategory;
       })
       .slice(0, 8);
-  };
+  }, [supplies, selectedCategory]);
 
   // Update suggestions as user types
   useEffect(() => {
@@ -72,23 +122,13 @@ export const LabSupplyFinder = () => {
       setSuggestions([]);
       setShowSuggestions(false);
     }
-  }, [searchQuery, selectedCategory]);
+  }, [searchQuery, selectedCategory, generateSuggestions]);
 
   // Filter supplies based on search and category
-  const filteredSupplies = useMemo(() => {
-    const displayList = showFavorites ? favorites : supplies;
-    return displayList.filter((supply) => {
-      const matchesQuery =
-        !searchQuery ||
-        supply.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        supply.description.toLowerCase().includes(searchQuery.toLowerCase());
-
-      const matchesCategory =
-        selectedCategory === 'All' || supply.category === selectedCategory;
-
-      return matchesQuery && matchesCategory;
-    });
-  }, [searchQuery, selectedCategory, showFavorites, favorites, supplies]);
+  const filteredSupplies = useMemo(
+    () => (showFavorites ? favorites : supplies),
+    [showFavorites, favorites, supplies],
+  );
 
   const handleSuggestionClick = (supply: LabSupply) => {
     setSearchQuery(supply.name);
@@ -144,20 +184,66 @@ export const LabSupplyFinder = () => {
     }
   };
 
-  const handleAddSupply = (supply: LabSupply) => {
-    setSupplies([...supplies, supply]);
+  const handleAddSupply = async (supply: LabSupply) => {
+    try {
+      setError(null);
+      const response = await fetch(`${API_BASE_URL}/api/supplies`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(supply),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.message || 'Өнімді қосу сәтсіз аяқталды');
+      }
+      await fetchSupplies(1);
+      setCurrentPage(1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Өнімді қосу кезінде қате');
+    }
   };
 
-  const handleEditSupply = (supply: LabSupply) => {
-    setSupplies(supplies.map((s) => (s.id === supply.id ? supply : s)));
+  const handleEditSupply = async (supply: LabSupply) => {
+    try {
+      setError(null);
+      const response = await fetch(`${API_BASE_URL}/api/supplies/${supply.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(supply),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.message || 'Өнімді жаңарту сәтсіз аяқталды');
+      }
+      await fetchSupplies(currentPage);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Өнімді жаңарту кезінде қате');
+    }
   };
 
-  const handleDeleteSupply = (id: string) => {
-    setSupplies(supplies.filter((s) => s.id !== id));
+  const handleDeleteSupply = async (id: string) => {
+    try {
+      setError(null);
+      const response = await fetch(`${API_BASE_URL}/api/supplies/${id}`, { method: 'DELETE' });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.message || 'Өнімді жою сәтсіз аяқталды');
+      }
+      const nextPage = supplies.length === 1 && currentPage > 1 ? currentPage - 1 : currentPage;
+      setCurrentPage(nextPage);
+      await fetchSupplies(nextPage);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Өнімді жою кезінде қате');
+    }
   };
 
   const handleRequestSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!Number.isInteger(requestData.quantity) || requestData.quantity < 1) {
+      setRequestError('Саны 1 немесе одан үлкен болуы керек');
+      return;
+    }
+    setRequestError(null);
     alert(
       `✅ Сұраныс жіберілді!\n\nӨнім: ${selectedSupply?.name}\nСаны: ${requestData.quantity}\nЕскертпесі: ${requestData.notes || 'жоқ'}`,
     );
@@ -282,6 +368,26 @@ export const LabSupplyFinder = () => {
               ))}
             </div>
           </div>
+          <div className="toolbar-row">
+            <div className="sort-group">
+              <label htmlFor="sortBy">Сұрыптау:</label>
+              <select id="sortBy" value={sortBy} onChange={(e) => setSortBy(e.target.value as SortField)}>
+                <option value="name">Атауы</option>
+                <option value="price">Бағасы</option>
+                <option value="category">Категориясы</option>
+                <option value="availability">Қолда барлығы</option>
+                <option value="createdAt">Қосылған күні</option>
+              </select>
+              <select value={order} onChange={(e) => setOrder(e.target.value as SortOrder)}>
+                <option value="asc">Өсу ретімен</option>
+                <option value="desc">Кему ретімен</option>
+              </select>
+            </div>
+            <button className="refresh-btn" onClick={() => void fetchSupplies(currentPage)} disabled={isLoading}>
+              Жаңарту
+            </button>
+          </div>
+          {error && <p className="error-banner">{error}</p>}
         </div>
 
         {/* Main Content */}
@@ -289,10 +395,12 @@ export const LabSupplyFinder = () => {
           {/* Left: Supply List */}
           <div className="supplies-list-container">
             <h2>
-              {showFavorites ? '⭐ Таңдаулылар' : '📦 Қол жетімді өнімдер'} ({filteredSupplies.length})
+              {showFavorites ? '⭐ Таңдаулылар' : '📦 Қол жетімді өнімдер'} ({showFavorites ? filteredSupplies.length : total})
             </h2>
             <div className="supplies-list">
-              {filteredSupplies.length > 0 ? (
+              {isLoading ? (
+                <div className="no-results"><p>Жүктелуде...</p></div>
+              ) : filteredSupplies.length > 0 ? (
                 filteredSupplies.map((supply) => (
                   <div
                     key={supply.id}
@@ -345,6 +453,25 @@ export const LabSupplyFinder = () => {
                 </div>
               )}
             </div>
+            {!showFavorites && (
+              <div className="pagination">
+                <button
+                  onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                  disabled={currentPage === 1 || isLoading}
+                >
+                  ← Алдыңғы
+                </button>
+                <span>
+                  Бет {currentPage} / {Math.max(1, Math.ceil(total / PAGE_SIZE))}
+                </span>
+                <button
+                  onClick={() => setCurrentPage((prev) => prev + 1)}
+                  disabled={currentPage >= Math.ceil(total / PAGE_SIZE) || isLoading}
+                >
+                  Келесі →
+                </button>
+              </div>
+            )}
           </div>
 
             {selectedSupply && (
@@ -423,7 +550,7 @@ export const LabSupplyFinder = () => {
                           onChange={(e) =>
                             setRequestData({
                               ...requestData,
-                              quantity: parseInt(e.target.value),
+                              quantity: Number.parseInt(e.target.value, 10) || 0,
                             })
                           }
                           required
@@ -439,6 +566,7 @@ export const LabSupplyFinder = () => {
                           placeholder="Қосымша ақпарат..."
                         />
                       </div>
+                      {requestError && <p className="form-error">{requestError}</p>}
                       <button type="submit" className="btn-submit-request">
                         ✅ Сұраныс жіберу
                       </button>

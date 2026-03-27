@@ -33,3 +33,30 @@ jobs:
       - name: Sequelize sync check
         run: |
           node -e "require('./src/models').sequelize.sync({ alter: true }).then(()=>console.log('synced')).catch((e)=>{ console.error(e); process.exit(1); })"
+
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: [frontend, backend]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build frontend image
+        run: docker build -t lab-supply-frontend:ci .
+      - name: Build backend image
+        run: docker build -t lab-supply-backend:ci ./server
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: docker-build
+    if: github.ref == 'refs/heads/main' && secrets.DEPLOY_HOST != '' && secrets.DEPLOY_USER != '' && secrets.DEPLOY_SSH_KEY != ''
+    steps:
+      - name: Deploy to server via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            cd ${{ secrets.DEPLOY_PATH }}
+            git pull
+            docker compose build
+            docker compose up -d

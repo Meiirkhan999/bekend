@@ -1,14 +1,35 @@
 version: '3.9'
 services:
+  database:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: lab_supply
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d lab_supply']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   backend:
     build:
       context: ./server
       dockerfile: Dockerfile
+    environment:
+      DB_DIALECT: postgres
+      DATABASE_URL: postgresql://postgres:postgres@database:5432/lab_supply
+      PORT: 3001
     ports:
       - '3001:3001'
-    volumes:
-      - ./server:/app
-      - ./server/database.sqlite:/app/database.sqlite
+    depends_on:
+      database:
+        condition: service_healthy
     restart: unless-stopped
 
   frontend:
@@ -20,5 +41,8 @@ services:
     depends_on:
       - backend
     environment:
-      - VITE_BACKEND_URL=http://backend:3001
+      - VITE_BACKEND_URL=http://localhost:3001
     restart: unless-stopped
+
+volumes:
+  postgres_data:
